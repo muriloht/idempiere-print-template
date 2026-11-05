@@ -86,18 +86,22 @@ public class FreemarkerReportRenderer implements IReportRenderer<FreemarkerRepor
 		List<PO> listPOs = config.getPOs();
 		List<Map<String, Object>> rowMaps = config.getRowMaps();
 		try {
+			// printTemplate vem de um cache por ID: seu ctx é de quem carregou primeiro,
+			// então cliente e contexto saem da requisição, nunca do template
+			Properties ctx = resolveRequestContext(reportEngine, config);
+			// document and list mode: the configuration (templates, includes, limits) is that of the
+			// record's client; keyless mode has no record and keeps the request's client
+			int adClientId = resolveConfigurationClient(ctx, config);
 			Template template = new Template(printTemplate.getName(),
-					printTemplate.getTemplateBody(), FreemarkerConfigurationFactory.get());
+					printTemplate.getTemplateBody(),
+					FreemarkerConfigurationFactory.get(adClientId));
 
 			Map<String, Object> dataModel;
-			Properties ctx;
 			if (rowMaps != null) {
-				// Modo listagem sobre view KEYLESS: linhas já montadas (sem PO);
-				// ctx sai do template pois não há PO representativo
+				// Modo listagem sobre view KEYLESS: linhas já montadas (sem PO)
 				dataModel = new LinkedHashMap<>();
 				dataModel.put("rows", rowMaps);
 				dataModel.put("count", rowMaps.size());
-				ctx = printTemplate.getCtx();
 			} else if (listPOs != null && !listPOs.isEmpty()) {
 				// Modo listagem (IsForm='N'): todos os registros em rows; o
 				// template itera (<#list rows as r>) e agrega na mão
@@ -107,27 +111,41 @@ public class FreemarkerReportRenderer implements IReportRenderer<FreemarkerRepor
 				dataModel = new LinkedHashMap<>();
 				dataModel.put("rows", rows);
 				dataModel.put("count", rows.size());
-				ctx = config.getPO().getCtx();
 			} else {
 				// Modo documento (IsForm='Y'): colunas do PO no topo
 				dataModel = PO2MapBuilder.build(targetPO, printTemplate.getIncludes());
-				ctx = targetPO.getCtx();
 			}
 			dataModel.put("ctx", contextMap(ctx));
-			dataModel.put("assets", AssetResolver.asBase64(printTemplate));
+			dataModel.put("assets", AssetResolver.asBase64(ctx, printTemplate));
 
 			if (isPdfOutput(config, printTemplate)) {
 				// Fase 4: FreeMarker → HTML em memória → openhtmltopdf (@page CSS
 				// controla tamanho/margens; jsoup tolera HTML não-XHTML)
 				StringWriter html = new StringWriter();
-				template.process(dataModel, html);
-				try (OutputStream output = resolveOutputStream(config)) {
-					HtmlToPdfConverter.convert(html.toString(), output);
+				GuardedRender.process(template, dataModel, html, adClientId, ctx);
+				if (config.getOutputStream() != null) {
+					// the caller's stream is flushed, not closed
+					HtmlToPdfConverter.convert(html.toString(), config.getOutputStream());
+					config.getOutputStream().flush();
+				} else {
+					try (OutputStream output = resolveOutputStream(config)) {
+						HtmlToPdfConverter.convert(html.toString(), output);
+					}
 				}
 			} else {
-				Writer writer = resolveWriter(config, printTemplate.getTemplateEncoding());
-				template.process(dataModel, writer);
-				writer.flush();
+				if (config.getOutputWriter() == null && config.getOutputStream() == null
+						&& config.getOutputFile() != null) {
+					// a writer the renderer opens on a file is its own to close
+					try (Writer writer = new OutputStreamWriter(
+							new FileOutputStream(config.getOutputFile(), false), printTemplate.getTemplateEncoding())) {
+						GuardedRender.process(template, dataModel, writer, adClientId, ctx);
+					}
+				} else {
+					// a writer or stream of the caller is flushed, not closed
+					Writer writer = resolveWriter(config, printTemplate.getTemplateEncoding());
+					GuardedRender.process(template, dataModel, writer, adClientId, ctx);
+					writer.flush();
+				}
 			}
 		} catch (AdempiereException e) {
 			throw e;
@@ -135,6 +153,38 @@ public class FreemarkerReportRenderer implements IReportRenderer<FreemarkerRepor
 			throw new AdempiereException("Falha renderizando template '" + printTemplate.getName()
 					+ "': " + e.getMessage(), e);
 		}
+	}
+
+	/**
+	 * Contexto da requisição: do ReportEngine; senão do PO alvo (modo documento);
+	 * senão do primeiro PO da listagem; senão Env.getCtx(). Define a configuração
+	 * FreeMarker (cliente) e o mapa ctx do template.
+	 */
+	static Properties resolveRequestContext(ReportEngine reportEngine,
+			FreemarkerReportRendererConfiguration config) {
+		if (reportEngine != null && reportEngine.getCtx() != null)
+			return reportEngine.getCtx();
+		if (config.getPO() != null)
+			return config.getPO().getCtx();
+		List<PO> listPOs = config.getPOs();
+		if (listPOs != null && !listPOs.isEmpty())
+			return listPOs.get(0).getCtx();
+		return Env.getCtx();
+	}
+
+	/**
+	 * Client of the FreeMarker configuration: the target record's AD_Client_ID in document and list mode,
+	 * the request context's client in keyless mode (row maps, no record).
+	 */
+	static int resolveConfigurationClient(Properties requestCtx, FreemarkerReportRendererConfiguration config) {
+		if (config.getRowMaps() == null) {
+			if (config.getPO() != null)
+				return config.getPO().getAD_Client_ID();
+			List<PO> listPOs = config.getPOs();
+			if (listPOs != null && !listPOs.isEmpty())
+				return listPOs.get(0).getAD_Client_ID();
+		}
+		return Env.getAD_Client_ID(requestCtx);
 	}
 
 	private boolean isPdfOutput(FreemarkerReportRendererConfiguration config, MPrintTemplate template) {
@@ -160,8 +210,6 @@ public class FreemarkerReportRenderer implements IReportRenderer<FreemarkerRepor
 			return config.getOutputWriter();
 		if (config.getOutputStream() != null)
 			return new OutputStreamWriter(config.getOutputStream(), encoding);
-		if (config.getOutputFile() != null)
-			return new OutputStreamWriter(new FileOutputStream(config.getOutputFile(), false), encoding);
 		throw new AdempiereException("Nenhum output configurado (writer/stream/file)");
 	}
 

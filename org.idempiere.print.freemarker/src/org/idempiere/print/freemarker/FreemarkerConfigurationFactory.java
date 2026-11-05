@@ -13,6 +13,10 @@
 **********************************************************************/
 package org.idempiere.print.freemarker;
 
+import java.io.IOException;
+import java.util.Locale;
+import java.util.concurrent.ConcurrentHashMap;
+
 import org.compiere.model.MSysConfig;
 
 import freemarker.cache.ClassTemplateLoader;
@@ -21,17 +25,23 @@ import freemarker.cache.TemplateLoader;
 import freemarker.core.HTMLOutputFormat;
 import freemarker.core.TemplateClassResolver;
 import freemarker.template.Configuration;
+import freemarker.template.Template;
 import freemarker.template.TemplateExceptionHandler;
 
 /**
- * Configuration singleton do FreeMarker:
- * - MultiTemplateLoader: banco (AD_PrintTemplate) → classpath do bundle
+ * Configuração do FreeMarker, uma por cliente (AD_Client_ID):
+ * - MultiTemplateLoader: banco (AD_PrintTemplate, ligado ao cliente) → classpath do bundle
  *   (/templates) — spec §4.8;
  * - HTMLOutputFormat (auto-escape XSS em ${var}; ${var?no_esc} opt-out);
  * - RETHROW: erro de template quebra a renderização com causa real
  *   (plugin genérico não engole erro);
- * - SAFER_RESOLVER: template não instancia classe arbitrária;
- * - formatos default BR, sobrescrevíveis via SysConfig PRT_FREEMARKER_*.
+ * - sandbox: ?new bloqueado (ALLOWS_NOTHING_RESOLVER) e ?api desligado; com
+ *   SysConfig PRT_FREEMARKER_STRICT=N do System (client 0), ?new usa SAFER_RESOLVER.
+ *   A tenant row of PRT_FREEMARKER_STRICT is ignored: a tenant cannot relax the sandbox;
+ * - formatos default BR, sobrescrevíveis via SysConfig PRT_FREEMARKER_* (por cliente).
+ * <p>
+ * A configuração é construída uma vez por cliente. Mudança em SysConfig
+ * (PRT_FREEMARKER_STRICT e formatos) só vale após {@link #reset()} ou restart.
  */
 public final class FreemarkerConfigurationFactory {
 
@@ -39,25 +49,65 @@ public final class FreemarkerConfigurationFactory {
 	public static final String SYSCONFIG_TIME_FORMAT = "PRT_FREEMARKER_TIME_FORMAT";
 	public static final String SYSCONFIG_DATETIME_FORMAT = "PRT_FREEMARKER_DATETIME_FORMAT";
 	public static final String SYSCONFIG_NUMBER_FORMAT = "PRT_FREEMARKER_NUMBER_FORMAT";
+	public static final String SYSCONFIG_STRICT = "PRT_FREEMARKER_STRICT";
 
-	private static volatile Configuration s_configuration;
+	/** Uma configuração por cliente; limitada pelo número de clientes. */
+	private static final ConcurrentHashMap<Integer, Configuration> s_configurations = new ConcurrentHashMap<>();
 
 	private FreemarkerConfigurationFactory() {}
 
-	public static Configuration get() {
-		if (s_configuration == null) {
-			synchronized (FreemarkerConfigurationFactory.class) {
-				if (s_configuration == null)
-					s_configuration = build();
-			}
-		}
-		return s_configuration;
+	/**
+	 * @param adClientId cliente cujos templates, includes e SysConfig valem
+	 * @return a configuração do cliente (criada na primeira chamada)
+	 */
+	public static Configuration get(int adClientId) {
+		return s_configurations.computeIfAbsent(adClientId, FreemarkerConfigurationFactory::build);
 	}
 
-	private static Configuration build() {
-		Configuration cfg = new Configuration(Configuration.VERSION_2_3_31);
+	/**
+	 * @return true (padrão) se ?new não pode instanciar nenhuma classe; false
+	 *         só com SysConfig PRT_FREEMARKER_STRICT=N do System (client 0); a tenant row is
+	 *         ignored. Lido na criação da configuração: a mudança vale após {@link #reset()} ou
+	 *         restart.
+	 */
+	public static boolean isStrict() {
+		return MSysConfig.getBooleanValue(SYSCONFIG_STRICT, true, 0);
+	}
+
+	/** Descarta as configurações construídas. Só para testes. */
+	public static void reset() {
+		s_configurations.clear();
+	}
+
+	/**
+	 * Strict configuration: every template it loads (includes and imports too) gets interrupt checks,
+	 * so that {@link GuardedRender} can stop a loop that writes nothing. {@link GuardedRender} applies
+	 * its limits exactly to the templates whose configuration is of this class, so the sandbox and the
+	 * limits of a template are decided once, when its configuration is built.
+	 */
+	static final class StrictConfiguration extends Configuration {
+		StrictConfiguration() {
+			super(Configuration.VERSION_2_3_34);
+		}
+
+		@Override
+		public Template getTemplate(String name, Locale locale, Object customLookupCondition, String encoding,
+				boolean parseAsFTL, boolean ignoreMissing) throws IOException {
+			Template template = super.getTemplate(name, locale, customLookupCondition, encoding, parseAsFTL,
+					ignoreMissing);
+			if (template != null) {
+				GuardedRender.makeInterruptible(template);
+			}
+			return template;
+		}
+	}
+
+	private static Configuration build(int adClientId) {
+		boolean strict = isStrict();
+		Configuration cfg = strict ? new StrictConfiguration()
+				: new Configuration(Configuration.VERSION_2_3_34);
 		cfg.setTemplateLoader(new MultiTemplateLoader(new TemplateLoader[] {
-				new DatabaseTemplateLoader(),
+				new DatabaseTemplateLoader(adClientId),
 				new ClassTemplateLoader(FreemarkerConfigurationFactory.class, "/templates")
 		}));
 		cfg.setLocalizedLookup(false);
@@ -67,11 +117,14 @@ public final class FreemarkerConfigurationFactory {
 		cfg.setTemplateExceptionHandler(TemplateExceptionHandler.RETHROW_HANDLER);
 		cfg.setLogTemplateExceptions(false);
 		cfg.setWrapUncheckedExceptions(true);
-		cfg.setNewBuiltinClassResolver(TemplateClassResolver.SAFER_RESOLVER);
-		cfg.setDateFormat(MSysConfig.getValue(SYSCONFIG_DATE_FORMAT, "dd/MM/yyyy"));
-		cfg.setTimeFormat(MSysConfig.getValue(SYSCONFIG_TIME_FORMAT, "HH:mm:ss"));
-		cfg.setDateTimeFormat(MSysConfig.getValue(SYSCONFIG_DATETIME_FORMAT, "dd/MM/yyyy HH:mm"));
-		cfg.setNumberFormat(MSysConfig.getValue(SYSCONFIG_NUMBER_FORMAT, "#,##0.##"));
+		cfg.setAPIBuiltinEnabled(false);
+		cfg.setNewBuiltinClassResolver(strict
+				? TemplateClassResolver.ALLOWS_NOTHING_RESOLVER
+				: TemplateClassResolver.SAFER_RESOLVER);
+		cfg.setDateFormat(MSysConfig.getValue(SYSCONFIG_DATE_FORMAT, "dd/MM/yyyy", adClientId));
+		cfg.setTimeFormat(MSysConfig.getValue(SYSCONFIG_TIME_FORMAT, "HH:mm:ss", adClientId));
+		cfg.setDateTimeFormat(MSysConfig.getValue(SYSCONFIG_DATETIME_FORMAT, "dd/MM/yyyy HH:mm", adClientId));
+		cfg.setNumberFormat(MSysConfig.getValue(SYSCONFIG_NUMBER_FORMAT, "#,##0.##", adClientId));
 		return cfg;
 	}
 }

@@ -16,6 +16,7 @@ package org.idempiere.print.freemarker;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Properties;
 
 import org.compiere.model.MAttachment;
 import org.compiere.model.MAttachmentEntry;
@@ -30,9 +31,14 @@ public final class AssetResolver {
 
 	private AssetResolver() {}
 
-	public static Map<String, String> asBase64(MPrintTemplate template) {
+	/**
+	 * @param ctx context of the request (the cached template's context may be another client's)
+	 * @param template the template
+	 * @return attachment name to base64 content
+	 */
+	public static Map<String, String> asBase64(Properties ctx, MPrintTemplate template) {
 		Map<String, String> assets = new LinkedHashMap<>();
-		MAttachment attachment = MAttachment.get(template.getCtx(),
+		MAttachment attachment = MAttachment.get(ctx,
 				MPrintTemplate.Table_ID, template.getAD_PrintTemplate_ID());
 		if (attachment != null) {
 			for (MAttachmentEntry entry : attachment.getEntries()) {

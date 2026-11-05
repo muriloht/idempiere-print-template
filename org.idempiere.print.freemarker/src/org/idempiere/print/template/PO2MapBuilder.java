@@ -21,9 +21,12 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
+import java.util.regex.Pattern;
 
 import org.adempiere.exceptions.AdempiereException;
 import org.compiere.model.Lookup;
+import org.compiere.model.MRole;
 import org.compiere.model.MTable;
 import org.compiere.model.PO;
 import org.compiere.model.POInfo;
@@ -31,6 +34,7 @@ import org.compiere.model.Query;
 import org.compiere.util.CLogger;
 import org.compiere.util.DisplayType;
 import org.compiere.util.Util;
+import org.idempiere.print.freemarker.FreemarkerConfigurationFactory;
 import org.idempiere.print.template.model.MPrintTemplateInclude;
 
 import com.google.gson.Gson;
@@ -138,6 +142,45 @@ public final class PO2MapBuilder {
 		return rs.getString(columnName);
 	}
 
+	/**
+	 * The access filter of Query needs a role; without one (no #AD_Role_ID/#AD_User_ID in the context)
+	 * MRole.getDefault returns null and Query would skip the filter, so fail instead. Called just
+	 * before a child query runs: a record without child tables needs no role.
+	 */
+	private static void requireRole(PO po) {
+		requireRole(po.getCtx(), po.get_TableName());
+	}
+
+	/**
+	 * @param ctx context of the query
+	 * @param tableName table whose data is read, named in the message
+	 * @return the role of the context
+	 * @throws AdempiereException when the context has no role
+	 */
+	public static MRole requireRole(Properties ctx, String tableName) {
+		MRole role = MRole.getDefault(ctx, false);
+		if (role == null)
+			throw new AdempiereException("Template child data of " + tableName
+					+ " needs a role in the context; the user running this print needs a role");
+		return role;
+	}
+
+	/** The word SELECT, any case, as a whole word: a subquery. */
+	private static final Pattern SELECT_WORD = Pattern.compile("(?i)\\bselect\\b");
+
+	/**
+	 * SQL fragment of an include (WhereClause, OrderByClause): no second statement and no comment; in
+	 * strict mode ({@link FreemarkerConfigurationFactory#isStrict()}) also no subquery, since a subquery
+	 * would read other tables without the role's access filter.
+	 */
+	private static void rejectUnsafeSql(MPrintTemplateInclude include, String field, String sql) {
+		if (Util.isEmpty(sql, true))
+			return;
+		if (sql.contains(";") || sql.contains("--") || sql.contains("/*")
+				|| (FreemarkerConfigurationFactory.isStrict() && SELECT_WORD.matcher(sql).find()))
+			throw new AdempiereException("Include '" + include.getTargetName() + "': " + field + " inválida");
+	}
+
 	private static List<Map<String, Object>> loadChildren(PO po, MPrintTemplateInclude include) {
 		MTable childTable = MTable.get(po.getCtx(), include.getAD_Table_ID());
 		String fkColumn = po.get_TableName() + "_ID";
@@ -147,16 +190,18 @@ public final class PO2MapBuilder {
 					+ childTable.getTableName() + " não tem FK " + fkColumn);
 
 		String extraWhere = include.getWhereClause();
-		if (!Util.isEmpty(extraWhere, true) && (extraWhere.contains(";") || extraWhere.contains("--")))
-			throw new AdempiereException("Include '" + include.getTargetName() + "': WhereClause inválida");
+		rejectUnsafeSql(include, "WhereClause", extraWhere);
+		rejectUnsafeSql(include, "OrderByClause", include.getOrderByClause());
 
-		StringBuilder where = new StringBuilder(fkColumn).append("=?");
+		requireRole(po);
+		StringBuilder where = new StringBuilder(fkColumn).append("=? AND AD_Client_ID=?");
 		if (!Util.isEmpty(extraWhere, true))
 			where.append(" AND (").append(extraWhere).append(")");
 
 		Query query = new Query(po.getCtx(), childTable.getTableName(), where.toString(), po.get_TrxName())
-				.setParameters(po.get_ID())
-				.setOnlyActiveRecords(true);
+				.setParameters(po.get_ID(), po.getAD_Client_ID())
+				.setOnlyActiveRecords(true)
+				.setApplyAccessFilter(true);
 		if (!Util.isEmpty(include.getOrderByClause(), true))
 			query.setOrderBy(include.getOrderByClause());
 
@@ -192,9 +237,11 @@ public final class PO2MapBuilder {
 		String fkColumn = po.get_TableName() + "_ID";
 		if (POInfo.getPOInfo(po.getCtx(), childTableId).getColumnIndex(fkColumn) < 0)
 			return null;
-		List<PO> rows = new Query(po.getCtx(), childTableName, fkColumn + "=?", po.get_TrxName())
-				.setParameters(po.get_ID())
+		requireRole(po);
+		List<PO> rows = new Query(po.getCtx(), childTableName, fkColumn + "=? AND AD_Client_ID=?", po.get_TrxName())
+				.setParameters(po.get_ID(), po.getAD_Client_ID())
 				.setOnlyActiveRecords(true)
+				.setApplyAccessFilter(true)
 				.list();
 		List<Map<String, Object>> result = new ArrayList<>();
 		for (PO row : rows) {

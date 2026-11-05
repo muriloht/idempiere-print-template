@@ -95,7 +95,7 @@ public class TemplateValidateProcess extends SvrProcess {
 			return;
 		try {
 			new freemarker.template.Template(template.getName(), template.getTemplateBody(),
-					org.idempiere.print.freemarker.FreemarkerConfigurationFactory.get());
+					org.idempiere.print.freemarker.FreemarkerConfigurationFactory.get(getAD_Client_ID()));
 		} catch (Exception e) {
 			throw new AdempiereException("Sintaxe inválida no template: " + e.getMessage());
 		}
