@@ -20,6 +20,7 @@ import java.util.Map;
 import org.adempiere.base.Core;
 import org.adempiere.exceptions.AdempiereException;
 import org.compiere.model.PO;
+import org.compiere.util.Language;
 import org.compiere.util.CLogger;
 import org.idempiere.print.renderer.IReportRenderer;
 import org.idempiere.print.renderer.IReportRendererConfiguration;
@@ -69,6 +70,14 @@ public class TemplateRenderDispatcher {
 	 * @param outputFormat extensão efetiva ("pdf"/"html"); null = default do template
 	 */
 	public static boolean render(MPrintTemplate template, PO targetPO, File outputFile, String outputFormat) {
+		return render(template, targetPO, outputFile, outputFormat, null);
+	}
+
+	/**
+	 * @param language document language; null = the language of the request's context
+	 */
+	public static boolean render(MPrintTemplate template, PO targetPO, File outputFile, String outputFormat,
+			Language language) {
 		String engineType = template.getTemplateEngineType();
 		IReportRenderer<IReportRendererConfiguration> renderer = getRenderer(engineType);
 		if (renderer == null)
@@ -76,6 +85,7 @@ public class TemplateRenderDispatcher {
 		TemplateRendererConfiguration config = newConfig(renderer, engineType, template, targetPO);
 		config.outputFile(outputFile);
 		config.outputFormat(outputFormat);
+		config.language(language);
 		renderer.renderReport(null, config);
 		return true;
 	}
@@ -88,6 +98,14 @@ public class TemplateRenderDispatcher {
 	 * @return false quando não há renderer registrado ou a lista é vazia
 	 */
 	public static boolean renderList(MPrintTemplate template, List<PO> targetPOs, File outputFile, String outputFormat) {
+		return renderList(template, targetPOs, outputFile, outputFormat, null);
+	}
+
+	/**
+	 * @param language document language; null = the language of the request's context
+	 */
+	public static boolean renderList(MPrintTemplate template, List<PO> targetPOs, File outputFile,
+			String outputFormat, Language language) {
 		if (targetPOs == null || targetPOs.isEmpty())
 			return false;
 		String engineType = template.getTemplateEngineType();
@@ -98,6 +116,7 @@ public class TemplateRenderDispatcher {
 		config.targetPOs(targetPOs);
 		config.outputFile(outputFile);
 		config.outputFormat(outputFormat);
+		config.language(language);
 		renderer.renderReport(null, config);
 		return true;
 	}
@@ -111,6 +130,14 @@ public class TemplateRenderDispatcher {
 	 */
 	public static boolean renderListMaps(MPrintTemplate template, List<Map<String, Object>> rowMaps,
 			File outputFile, String outputFormat) {
+		return renderListMaps(template, rowMaps, outputFile, outputFormat, null);
+	}
+
+	/**
+	 * @param language document language; null = the language of the request's context
+	 */
+	public static boolean renderListMaps(MPrintTemplate template, List<Map<String, Object>> rowMaps,
+			File outputFile, String outputFormat, Language language) {
 		if (rowMaps == null)
 			return false;
 		String engineType = template.getTemplateEngineType();
@@ -121,6 +148,7 @@ public class TemplateRenderDispatcher {
 		config.rowMaps(rowMaps);
 		config.outputFile(outputFile);
 		config.outputFormat(outputFormat);
+		config.language(language);
 		renderer.renderReport(null, config);
 		return true;
 	}

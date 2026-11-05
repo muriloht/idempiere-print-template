@@ -15,6 +15,7 @@ package org.idempiere.print.freemarker;
 
 import java.io.Reader;
 import java.io.StringReader;
+import java.util.Properties;
 
 import org.compiere.model.Query;
 import org.compiere.util.Env;
@@ -32,11 +33,25 @@ import freemarker.cache.TemplateLoader;
  */
 public class DatabaseTemplateLoader implements TemplateLoader {
 
+	private final int m_adClientId;
+
+	/**
+	 * @param adClientId cliente fixo deste loader; não depende do contexto da thread
+	 */
+	public DatabaseTemplateLoader(int adClientId) {
+		m_adClientId = adClientId;
+	}
+
 	@Override
 	public Object findTemplateSource(String name) {
-		return new Query(Env.getCtx(), I_AD_PrintTemplate.Table_Name,
+		// Cópia do ctx com #AD_Client_ID do loader: o Query não pode lançar
+		// CrossTenantException quando o cliente da thread difere do cliente deste loader
+		Properties ctx = new Properties();
+		ctx.putAll(Env.getCtx());
+		Env.setContext(ctx, Env.AD_CLIENT_ID, m_adClientId);
+		return new Query(ctx, I_AD_PrintTemplate.Table_Name,
 				I_AD_PrintTemplate.COLUMNNAME_Name + "=? AND AD_Client_ID IN (0,?)", null)
-			.setParameters(name, Env.getAD_Client_ID(Env.getCtx()))
+			.setParameters(name, m_adClientId)
 			.setOnlyActiveRecords(true)
 			.setOrderBy("AD_Client_ID DESC, AD_Org_ID DESC")
 			.first();
