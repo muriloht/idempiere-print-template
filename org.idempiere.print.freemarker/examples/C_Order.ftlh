@@ -1,8 +1,8 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="${ctx.language?keep_before('_')}">
 <head>
   <meta charset="UTF-8" />
-  <title>Auftrag ${DocumentNo!""}</title>
+  <title>${msg("C_Order_ID")} ${DocumentNo!""}</title>
   <#include "styles.ftlh">
   <style>
     @page { size: A4; margin: 16mm 15mm 18mm; }
@@ -45,10 +45,10 @@
       </td>
       <td>
         <table class="document-meta">
-          <tr><td>Auftragsnummer</td><td><strong>${DocumentNo!""}</strong></td></tr>
-          <tr><td>Auftragsdatum</td><td>${(DateOrdered?string["dd.MM.yyyy"])!""}</td></tr>
-          <tr><td>Kundenreferenz</td><td>${POReference!"–"}</td></tr>
-          <tr><td>Sachbearbeiter</td><td>${(SalesRep_ID.display)!"–"}</td></tr>
+          <tr><td>${msg("DocumentNo")}</td><td><strong>${DocumentNo!""}</strong></td></tr>
+          <tr><td>${msg("DateOrdered")}</td><td>${(DateOrdered?date)!""}</td></tr>
+          <tr><td>${msg("POReference")}</td><td>${POReference!"–"}</td></tr>
+          <tr><td>${msg("SalesRep_ID")}</td><td>${(SalesRep_ID.display)!"–"}</td></tr>
         </table>
       </td>
     </tr>
@@ -60,21 +60,20 @@
     <#if (C_BPartner_Location_ID.display)??>${C_BPartner_Location_ID.display}</#if>
   </div>
 
-  <h1>Auftragsbestätigung ${DocumentNo!""}</h1>
+  <h1>${msg("C_Order_ID")} ${DocumentNo!""}</h1>
 
-  <p class="intro">
-    Vielen Dank für Ihren Auftrag. Wir bestätigen Ihnen folgende Positionen
-    <#if (DatePromised)??>mit Liefertermin ${DatePromised?string["dd.MM.yyyy"]}</#if>.
-  </p>
+  <#if (DatePromised)??>
+    <p class="intro">${msg("DatePromised")}: ${DatePromised?date}</p>
+  </#if>
 
   <table class="lines">
     <thead>
       <tr>
-        <th class="pos">Pos.</th>
-        <th>Artikel / Beschreibung</th>
-        <th class="qty">Menge</th>
-        <th class="price">Einzelpreis</th>
-        <th class="amount">Betrag</th>
+        <th class="pos">${msg("Line")}</th>
+        <th>${msg("M_Product_ID")} / ${msg("Description")}</th>
+        <th class="qty">${msg("QtyOrdered")}</th>
+        <th class="price">${msg("PriceActual")}</th>
+        <th class="amount">${msg("LineNetAmt")}</th>
       </tr>
     </thead>
     <tbody>
@@ -82,7 +81,7 @@
         <tr>
           <td class="pos">${line.Line!((line?index + 1) * 10)}</td>
           <td>
-            <strong>${(line.M_Product_ID.display)!(line.C_Charge_ID.display)!"Position"}</strong>
+            <strong>${(line.M_Product_ID.display)!(line.C_Charge_ID.display)!(msg("Line"))}</strong>
             <#if line.Description?? && line.Description?has_content>
               <div class="description">${line.Description}</div>
             </#if>
@@ -95,24 +94,24 @@
           <td class="amount">${(line.LineNetAmt?string[",##0.00"])!""}</td>
         </tr>
       <#else>
-        <tr><td colspan="5" class="muted">Keine Auftragspositionen vorhanden.</td></tr>
+        <tr><td colspan="5" class="muted">–</td></tr>
       </#list>
     </tbody>
   </table>
 
   <table class="summary">
     <tr>
-      <td>Zwischensumme</td>
+      <td>${msg("TotalLines")}</td>
       <td>${(TotalLines?string[",##0.00"])!""} ${(C_Currency_ID.display)!""}</td>
     </tr>
     <#list taxes![] as tax>
       <tr>
-        <td>${(tax.C_Tax_ID.display)!"Steuer"}</td>
+        <td>${(tax.C_Tax_ID.display)!(msg("C_Tax_ID"))}</td>
         <td>${(tax.TaxAmt?string[",##0.00"])!""} ${(C_Currency_ID.display)!""}</td>
       </tr>
     </#list>
     <tr class="grand-total">
-      <td>Gesamtbetrag</td>
+      <td>${msg("GrandTotal")}</td>
       <td>${(GrandTotal?string[",##0.00"])!""} ${(C_Currency_ID.display)!""}</td>
     </tr>
   </table>
@@ -123,7 +122,7 @@
 
   <div class="footer">
     ${ctx.org_name!ctx.client_name!""}
-    <#if (M_Warehouse_ID.display)??> · Lager: ${M_Warehouse_ID.display}</#if>
+    <#if (M_Warehouse_ID.display)??> · ${msg("M_Warehouse_ID")}: ${M_Warehouse_ID.display}</#if>
   </div>
 </body>
 </html>

@@ -1,0 +1,14 @@
+Manifest-Version: 1.0
+Bundle-ManifestVersion: 2
+Bundle-Name: iDempiere Print Template Engine (FreeMarker) Tests
+Bundle-SymbolicName: org.idempiere.print.freemarker.test
+Bundle-Version: 14.0.0.qualifier
+Bundle-Vendor: DevCoffee / Riskora
+Fragment-Host: org.idempiere.print.freemarker;bundle-version="[14.0.0,15.0.0)"
+Bundle-RequiredExecutionEnvironment: JavaSE-17
+Automatic-Module-Name: org.idempiere.print.freemarker.test
+Require-Bundle: org.adempiere.base;bundle-version="[14.0.0,15.0.0)",
+ org.idempiere.test;bundle-version="[14.0.0,15.0.0)";resolution:=optional
+Import-Package: org.junit.jupiter.api;version="5.6.0",
+ org.junit.jupiter.api.function;version="5.6.0",
+ org.opentest4j;version="1.2.0"

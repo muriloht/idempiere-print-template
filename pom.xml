@@ -1,0 +1,18 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+
+	<!-- Builds the bundle and its test fragment together (the fragment needs the bundle from the same
+	     reactor). The bundle alone still builds from its own directory. -->
+	<groupId>org.idempiere.print</groupId>
+	<artifactId>org.idempiere.print.freemarker.root</artifactId>
+	<version>14.0.0-SNAPSHOT</version>
+	<packaging>pom</packaging>
+	<name>iDempiere Print Template Engine (FreeMarker) build</name>
+
+	<modules>
+		<module>org.idempiere.print.freemarker</module>
+		<module>org.idempiere.print.freemarker.test</module>
+	</modules>
+</project>

@@ -1,0 +1,112 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+	<modelVersion>4.0.0</modelVersion>
+
+	<groupId>org.idempiere.print</groupId>
+	<artifactId>org.idempiere.print.freemarker.test</artifactId>
+	<version>14.0.0-SNAPSHOT</version>
+	<packaging>eclipse-test-plugin</packaging>
+	<name>iDempiere Print Template Engine (FreeMarker) Tests</name>
+	<description>Integration tests for org.idempiere.print.freemarker (fragment of the bundle)</description>
+
+	<properties>
+		<tycho.version>4.0.8</tycho.version>
+		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+		<!-- p2 repository of the locally-built iDempiere core (mvn verify on idempiere/), as for the bundle -->
+		<idempiere.core.repository.url>file:///${basedir}/../../idempiere/org.idempiere.p2/target/repository</idempiere.core.repository.url>
+		<!-- IDEMPIERE_HOME of the test JVM: AbstractTestCase reads idempiere.properties (the database) there -->
+		<idempiere.home>${basedir}/../../idempiere</idempiere.home>
+		<!-- The tests start an iDempiere runtime and need a GardenWorld database, so they do not run by
+		     default. Run them with: mvn verify -DskipTests=false -Dtest.groups=integration -->
+		<skipTests>true</skipTests>
+		<test.groups>unit</test.groups>
+		<test.excludedGroups>integration,e2e,slow</test.excludedGroups>
+	</properties>
+
+	<repositories>
+		<repository>
+			<id>idempiere-core</id>
+			<url>${idempiere.core.repository.url}</url>
+			<layout>p2</layout>
+		</repository>
+	</repositories>
+
+	<build>
+		<plugins>
+			<plugin>
+				<groupId>org.eclipse.tycho</groupId>
+				<artifactId>tycho-maven-plugin</artifactId>
+				<version>${tycho.version}</version>
+				<extensions>true</extensions>
+			</plugin>
+
+			<plugin>
+				<groupId>org.eclipse.tycho</groupId>
+				<artifactId>target-platform-configuration</artifactId>
+				<version>${tycho.version}</version>
+				<configuration>
+					<!-- the test runtime installs the server product for the machine running the build -->
+					<environments>
+						<environment><os>linux</os><ws>gtk</ws><arch>x86_64</arch></environment>
+						<environment><os>linux</os><ws>gtk</ws><arch>aarch64</arch></environment>
+						<environment><os>win32</os><ws>win32</ws><arch>x86_64</arch></environment>
+						<environment><os>macosx</os><ws>cocoa</ws><arch>x86_64</arch></environment>
+						<environment><os>macosx</os><ws>cocoa</ws><arch>aarch64</arch></environment>
+					</environments>
+					<dependency-resolution>
+						<extraRequirements>
+							<requirement>
+								<type>eclipse-plugin</type>
+								<id>org.eclipse.core.runtime</id>
+								<versionRange>0.0.0</versionRange>
+							</requirement>
+							<requirement>
+								<type>eclipse-plugin</type>
+								<id>org.eclipse.equinox.common</id>
+								<versionRange>0.0.0</versionRange>
+							</requirement>
+							<!-- the product makes the p2Installed runtime an iDempiere server; without it the
+							     launch fails with "No launcher bundle found" -->
+							<requirement>
+								<type>p2-installable-unit</type>
+								<id>org.adempiere.server.product</id>
+								<versionRange>0.0.0</versionRange>
+							</requirement>
+							<requirement>
+								<type>eclipse-plugin</type>
+								<id>org.idempiere.print.freemarker</id>
+								<versionRange>0.0.0</versionRange>
+							</requirement>
+							<!-- AbstractTestCase; the manifest requires it optionally, so p2 would leave it out -->
+							<requirement>
+								<type>eclipse-plugin</type>
+								<id>org.idempiere.test</id>
+								<versionRange>0.0.0</versionRange>
+							</requirement>
+						</extraRequirements>
+					</dependency-resolution>
+					<executionEnvironmentDefault>JavaSE-17</executionEnvironmentDefault>
+					<executionEnvironment>JavaSE-17</executionEnvironment>
+				</configuration>
+			</plugin>
+
+			<plugin>
+				<groupId>org.eclipse.tycho</groupId>
+				<artifactId>tycho-surefire-plugin</artifactId>
+				<version>${tycho.version}</version>
+				<configuration>
+					<testRuntime>p2Installed</testRuntime>
+					<skipTests>${skipTests}</skipTests>
+					<!-- distributed.backend=none: without it the cluster keeps looking for another node and
+					     the test JVM does not exit -->
+					<argLine>-DIDEMPIERE_HOME=${idempiere.home} -Didempiere.distributed.backend=none -Djunit.jupiter.execution.parallel.enabled=false</argLine>
+					<providerHint>junit59</providerHint>
+					<useUIHarness>false</useUIHarness>
+					<groups>${test.groups}</groups>
+					<excludedGroups>${test.excludedGroups}</excludedGroups>
+				</configuration>
+			</plugin>
+		</plugins>
+	</build>
+</project>

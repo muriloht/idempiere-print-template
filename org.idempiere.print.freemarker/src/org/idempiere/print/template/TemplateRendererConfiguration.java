@@ -20,6 +20,7 @@ import java.util.List;
 import java.util.Map;
 
 import org.compiere.model.PO;
+import org.compiere.util.Language;
 import org.idempiere.print.renderer.IReportRendererConfiguration;
 import org.idempiere.print.template.model.MPrintTemplate;
 
@@ -41,6 +42,7 @@ public class TemplateRendererConfiguration implements IReportRendererConfigurati
 	private OutputStream outputStream;
 	private Writer outputWriter;
 	private String outputFormat;
+	private Language language;
 
 	public TemplateRendererConfiguration(MPrintTemplate template, PO targetPO) {
 		this.template = template;
@@ -72,6 +74,20 @@ public class TemplateRendererConfiguration implements IReportRendererConfigurati
 
 	public TemplateRendererConfiguration rowMaps(List<Map<String, Object>> rowMaps) {
 		this.rowMaps = rowMaps;
+		return this;
+	}
+
+	/**
+	 * @return document language: the print format's language (iDempiere sets the business partner's
+	 *         language there when the client prints multi-lingual documents); null = the language of
+	 *         the request's context
+	 */
+	public Language getLanguage() {
+		return language;
+	}
+
+	public TemplateRendererConfiguration language(Language language) {
+		this.language = language;
 		return this;
 	}
 

@@ -30,9 +30,49 @@ top level (foreign keys as `{id, display}`), plus `ctx` (client/org/user/
 language/now) and `assets` (template attachments, base64). List mode adds
 `rows` (one map per record) and `count`.
 
+### Languages
+
+A template prints in the **document language**: the print format's language, chosen by iDempiere the
+same way for a template as for a native print format.
+
+| Print | Document language |
+| --- | --- |
+| a document (`ReportEngine.get`: order, invoice, shipment, …) | the tenant's language (`AD_Client.AD_Language`), or the business partner's (`C_BPartner.AD_Language`) when it has one |
+| a report or list | the login language: the user's preference |
+| the report viewer's language selector (tenants with *Multi Lingual Documents*) | the language picked |
+
+The tenant's language is the reference language of its own data. When the tenant saves a product,
+payment term or document type, core keeps its text in the base table and in the `_Trl` row of the
+tenant's language; a new record copies it into every `_Trl` row (`PO`, `TranslationDocSync`). Without
+*Multi Lingual Documents* every `_Trl` row keeps the same text. So a record nobody translated prints the
+tenant's text in every language, whatever the base language of the system is. Labels and list values
+come from the dictionary's translations, which fall back to the base language's text.
+
+- `msg("DocumentNo")` — the dictionary text of a message or element (print name), translated;
+  `msg("@DocumentNo@ / @DateOrdered@")` replaces each `@key@`; `msg("Key", arg…)` fills a message's
+  `{0}`, `{1}`… placeholders.
+- `ctx.language` is the document language, `ctx.login_language` the language of the user printing.
+- The language picked in the report viewer applies (it sets the print format's language). The language
+  of the process dialog does not, as for a native print format: core passes it only to Jasper.
+- Foreign keys (`*.display`) are shown in the document language.
+- A template on a view `X_v` (such as `C_Order_Header_v`) reads its translation view `X_vt` in the document
+  language when that is not the base language, as a print format does: the document type, payment term,
+  product and other texts of the view come translated.
+- List columns keep their code (`${DocStatus}` = `CO`) and get its name in the document language next
+  to it (`${DocStatus_display}` = `Completed`), as a print format prints a list column.
+- The locale of the render follows the document language: decimal and grouping separators (also in
+  `?string[",##0.00"]`), month names, and the default `?date`, `?time` and `?datetime` patterns, which are
+  the ones a print format uses (`AD_Language.DatePattern` / `TimePattern`, else the language's formats).
+  SysConfig `PRT_FREEMARKER_DATE_FORMAT` / `_TIME_FORMAT` / `_DATETIME_FORMAT` pin a pattern for a tenant.
+
+Write labels with `msg(…)` instead of fixed text, and dates with `?date` instead of a fixed pattern,
+and one template serves every language. `examples/C_Order.ftlh` does this; `examples/C_Order_multilang.ftlh`
+shows labels, formats and content together.
+
 Working examples live in [`examples/`](examples/):
 
 - `C_Order.ftlh` — document (invoice-style form)
+- `C_Order_multilang.ftlh` — document in the document language: labels, formats, translated content
 - `C_BPartner_list.ftlh` — flat listing with a total
 - `C_BPartner_grouped.ftlh` — grouped by BP Group with subtotals
 - `C_BPartner_customers_grouped.ftlh` — filtered + grouped + calculated column
@@ -45,6 +85,24 @@ kept in `spec/` (not versioned).
 Requires iDempiere 14 / Java 17. Import `org.idempiere.print.freemarker`
 as an Eclipse PDE project, or build headless with `mvn -U verify` (embedded
 runtime libraries are fetched by Maven — `lib/` is not committed).
+
+## Tests
+
+`org.idempiere.print.freemarker.test` is a fragment of the bundle with integration tests (`@Tag("integration")`):
+sandbox, limits, tenant and role filters, include SQL, fallback to core rendering, document language. They
+start an iDempiere runtime from the core p2 repository and need a GardenWorld database, so they do not run
+by default. From the repository root:
+
+```bash
+mvn verify -DskipTests=false -Dtest.groups=integration -Dtest.excludedGroups=e2e,slow \
+  -Didempiere.core.repository.url=file:///path/to/idempiere/org.idempiere.p2/target/repository \
+  -Didempiere.home=/path/to/idempiere-home
+```
+
+`idempiere.home` is the `IDEMPIERE_HOME` of the test JVM: a directory with `idempiere.properties` (the
+database connection), `idempiereEnv.properties` and `utils/`. The tests use the test transaction; templates
+and SysConfig rows they create are removed again. Tests on translated texts take their languages from the
+database and skip themselves when it has no translation.
 
 ## Credits
 
