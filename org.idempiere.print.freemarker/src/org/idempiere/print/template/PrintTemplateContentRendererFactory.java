@@ -73,25 +73,39 @@ public class PrintTemplateContentRendererFactory implements IReportContentRender
 		if (template == null || !template.isActive())
 			throw new AdempiereException("Print Template: template " + templateId + " does not exist or is inactive");
 
-		// Tabela/view KEYLESS (ex.: RV_OpenItem): não dá pra construir PO
-		// (PO.setKeyInfo exige PK/UU/FK) → lê as linhas direto do ResultSet.
-		int tableId = resolveTableId(request, template);
-		if (tableId > 0 && !(template.getAD_Table_ID() > 0 && template.getAD_Table_ID() != tableId)) {
-			MTable table = MTable.get(ctx, tableId);
-			String[] keys = table.getKeyColumns();
-			if (keys == null || keys.length == 0) {
-				List<Map<String, Object>> rowMaps = resolveKeylessRows(ctx, request, table, language);
-				if (rowMaps.isEmpty())
-					return null;
-				return new PrintTemplateContentRenderer(template, rowMaps, language); // keyless = sempre listagem
-			}
+		// Data table = the print format's (a view, for view-based formats), NOT the caller window's;
+		// the caller's Record_ID is applied only when the caller prints that same table (resolveTargetPOs).
+		// IDEMPIERE-7070 issue #1 (dpansheriya), problems 1 and 2.
+		int dataTableId = resolveDataTableId(request, template);
+		int callerTableId = resolveCallerTableId(request);
+		if (dataTableId <= 0)
+			dataTableId = callerTableId; // print format without a table: fall back to the caller's
+		if (dataTableId <= 0)
+			return null;
+		// template bound to another table than the data table → not applicable, let core print
+		if (template.getAD_Table_ID() > 0 && template.getAD_Table_ID() != dataTableId)
+			return null;
+
+		MTable table = MTable.get(ctx, dataTableId);
+		if (table == null)
+			return null;
+		boolean listMode = !printFormat.isForm();
+		// A view is read straight from the ResultSet, scoped by the report's MQuery: its key is often not
+		// unique (one row per line under a header), so it must never be loaded as a PO. A keyless table
+		// has no PO either.
+		String[] keys = table.getKeyColumns();
+		boolean keyless = keys == null || keys.length == 0;
+		if (keyless || (table.isView() && listMode)) {
+			List<Map<String, Object>> rowMaps = resolveKeylessRows(ctx, request, table, language);
+			if (rowMaps.isEmpty())
+				return null;
+			return new PrintTemplateContentRenderer(template, rowMaps, language); // listagem
 		}
 
-		List<PO> targets = resolveTargetPOs(ctx, request, template);
+		List<PO> targets = resolveTargetPOs(ctx, request, template, dataTableId, callerTableId);
 		if (targets.isEmpty())
-			return null; // sem contexto de registro (ex.: report avulso, Record_ID=0) → declina; o core segue no fluxo normal
+			return null; // sem contexto de registro (ex.: report avulso, Record_ID=0) → declina; o core segue normal
 		// IsForm='Y' → documento (1 render por registro + merge); IsForm='N' → listagem (1 render, rows = todos)
-		boolean listMode = !printFormat.isForm();
 		return new PrintTemplateContentRenderer(template, targets, listMode, language);
 	}
 
@@ -248,18 +262,22 @@ public class PrintTemplateContentRendererFactory implements IReportContentRender
 		throw new AdempiereException("Print Template: unsupported output type " + contentType + " (" + fileExtension + ")");
 	}
 
-	/** Resolve a tabela do report: printInfo → processInfo → printFormat → template */
-	private static int resolveTableId(ReportContentRequest request, MPrintTemplate template) {
+	/** Table the data comes from: the print format's (a view, for view-based formats), else the template's. */
+	private static int resolveDataTableId(ReportContentRequest request, MPrintTemplate template) {
+		MPrintFormat printFormat = request.printFormat();
+		int tableId = printFormat != null ? printFormat.getAD_Table_ID() : 0;
+		if (tableId <= 0 && template.getAD_Table_ID() > 0)
+			tableId = template.getAD_Table_ID();
+		return tableId;
+	}
+
+	/** Table of the caller that launched the report (a window toolbar), or 0: printInfo → processInfo. */
+	private static int resolveCallerTableId(ReportContentRequest request) {
 		PrintInfo printInfo = request.printInfo();
 		ProcessInfo processInfo = request.processInfo();
-		MPrintFormat printFormat = request.printFormat();
 		int tableId = printInfo != null ? printInfo.getAD_Table_ID() : 0;
 		if (tableId <= 0 && processInfo != null)
 			tableId = processInfo.getTable_ID();
-		if (tableId <= 0 && printFormat != null)
-			tableId = printFormat.getAD_Table_ID();
-		if (tableId <= 0 && template.getAD_Table_ID() > 0)
-			tableId = template.getAD_Table_ID();
 		return tableId;
 	}
 
@@ -277,6 +295,9 @@ public class PrintTemplateContentRendererFactory implements IReportContentRender
 		POInfo info = POInfo.getPOInfo(ctx, table.getAD_Table_ID());
 		if (info == null)
 			return rows;
+		// dictionary-driven columns: virtual (ColumnSQL) columns are added so they print, and a physical
+		// column the view lacks is reported — unless lenient. IDEMPIERE-7070 issue #1 (dpansheriya), problem 3
+		boolean lenient = PO2MapBuilder.isLenientColumns(ctx);
 		ReportEngine re = request.reportEngine();
 		MQuery mq = (re != null) ? re.getQuery() : null;
 		String mqWhere = (mq != null && mq.getRestrictionCount() > 0) ? mq.getWhereClause(false) : null;
@@ -288,7 +309,7 @@ public class PrintTemplateContentRendererFactory implements IReportContentRender
 		// as a print format reads it; the view keeps the name of the table, so the report's restriction and
 		// the role's access SQL read as they do on X_v
 		String view = display == null ? null : display.translationView(tableName);
-		StringBuilder sql = new StringBuilder("SELECT * FROM ");
+		StringBuilder sql = new StringBuilder("SELECT *").append(PO2MapBuilder.virtualColumns(info)).append(" FROM ");
 		if (view != null)
 			sql.append(view).append(" ");
 		sql.append(tableName).append(" WHERE 1=1");
@@ -314,9 +335,14 @@ public class PrintTemplateContentRendererFactory implements IReportContentRender
 							+ " linhas (filtre o report antes)");
 					break;
 				}
-				rows.add(PO2MapBuilder.buildFlatFromRS(ctx, info, rs, display));
+				rows.add(PO2MapBuilder.buildFlatFromRS(ctx, info, rs, display, lenient));
 			}
+		} catch (AdempiereException e) {
+			throw e; // a dictionary/view mismatch (strict) — surface it instead of a silent fallback
 		} catch (Exception e) {
+			if (!lenient)
+				throw new AdempiereException("Print Template: view " + tableName
+						+ " does not match the dictionary: " + e.getMessage(), e);
 			log.warning("Print Template: não li a view keyless " + tableName + " (" + e.getMessage() + ") — declinando");
 			return new ArrayList<>();
 		} finally {
@@ -326,40 +352,31 @@ public class PrintTemplateContentRendererFactory implements IReportContentRender
 	}
 
 	private static List<PO> resolveTargetPOs(Properties ctx, ReportContentRequest request,
-			MPrintTemplate template) {
+			MPrintTemplate template, int dataTableId, int callerTableId) {
 		PrintInfo printInfo = request.printInfo();
 		ProcessInfo processInfo = request.processInfo();
-		MPrintFormat printFormat = request.printFormat();
 
-		int tableId = printInfo != null ? printInfo.getAD_Table_ID() : 0;
-		int recordId = printInfo != null ? printInfo.getRecord_ID() : 0;
-		if (tableId <= 0 && processInfo != null)
-			tableId = processInfo.getTable_ID();
-		if (recordId <= 0 && processInfo != null)
-			recordId = processInfo.getRecord_ID();
-		if (tableId <= 0 && printFormat != null)
-			tableId = printFormat.getAD_Table_ID();
-		if (tableId <= 0 && template.getAD_Table_ID() > 0)
-			tableId = template.getAD_Table_ID();
-
-		List<Integer> recordIds = new ArrayList<>();
-		if (processInfo != null && processInfo.getRecord_IDs() != null) {
-			for (Integer id : processInfo.getRecord_IDs()) {
-				if (id != null && id.intValue() > 0)
-					recordIds.add(id);
-			}
-		}
-		if (recordId > 0)
-			recordIds.add(recordId);
-		recordIds = new ArrayList<>(new LinkedHashSet<>(recordIds));
-
-		if (tableId <= 0)
-			return new ArrayList<>(); // sem tabela → declina (createRenderer devolve null, o core segue normal)
-		if (template.getAD_Table_ID() > 0 && template.getAD_Table_ID() != tableId)
-			return new ArrayList<>(); // template é de outra tabela → declina
-
-		MTable table = MTable.get(ctx, tableId);
+		MTable table = MTable.get(ctx, dataTableId);
 		List<PO> targets = new ArrayList<>();
+
+		// The caller's record applies only when the caller prints its own table. A report whose print
+		// format is on another table (e.g. a document header printing a view) ignores it and prints the
+		// report's scope instead. IDEMPIERE-7070 issue #1 (dpansheriya), problem 1.
+		List<Integer> recordIds = new ArrayList<>();
+		if (callerTableId == dataTableId) {
+			if (processInfo != null && processInfo.getRecord_IDs() != null) {
+				for (Integer id : processInfo.getRecord_IDs()) {
+					if (id != null && id.intValue() > 0)
+						recordIds.add(id);
+				}
+			}
+			int recordId = printInfo != null ? printInfo.getRecord_ID() : 0;
+			if (recordId <= 0 && processInfo != null)
+				recordId = processInfo.getRecord_ID();
+			if (recordId > 0)
+				recordIds.add(recordId);
+			recordIds = new ArrayList<>(new LinkedHashSet<>(recordIds));
+		}
 
 		if (!recordIds.isEmpty()) {
 			// "current row" (Record_ID) e/ou multi-seleção do grid (ProcessInfo.Record_IDs)

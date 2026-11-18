@@ -28,7 +28,9 @@ Dictionary (`AD_PrintTemplate` + window) ships as an embedded incremental
 Each template is FreeMarker. The data model exposes the record's columns at
 top level (foreign keys as `{id, display}`), plus `ctx` (client/org/user/
 language/now) and `assets` (template attachments, base64). List mode adds
-`rows` (one map per record) and `count`.
+`rows` (one map per record) and `count`. `sysconfig("Key"[, "default"])`
+reads an AD_SysConfig value in the printing context's client/org (the
+equivalent of a classic `@$sysconfig.Name@`).
 
 ### Languages
 
