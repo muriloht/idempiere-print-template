@@ -137,6 +137,9 @@ public class RendererTenantTest extends AbstractTestCase {
 		assertEquals(11, Env.getAD_Client_ID(ctx11));
 		MPrintFormat format = new MPrintFormat(ctx11, tenantFormat, null);
 		format.set_ValueNoCheck("AD_PrintTemplate_ID", created.getAD_PrintTemplate_ID());
+		// the data table is the print format's (IDEMPIERE-7070 issue #1): put this reused format on the
+		// table the test reads (the template's), so it is not declined as a template of another table
+		format.set_ValueNoCheck("AD_Table_ID", tableId);
 		format.setIsForm(true);
 		MQuery query = new MQuery(tableId);
 		query.addRestriction("AD_PrintFormat_ID IN (" + systemFormat + "," + tenantFormat + ")");

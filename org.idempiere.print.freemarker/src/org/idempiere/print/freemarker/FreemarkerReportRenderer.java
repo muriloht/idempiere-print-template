@@ -47,7 +47,7 @@ import freemarker.template.Template;
  * Data model: colunas do PO (FK como {id, display}) + coleções dos
  * includes + namespace {@code ctx} (client/org/user/idioma/now) +
  * {@code assets} (anexos do template em base64) + {@code msg} (texts of the dictionary,
- * {@link TranslateMethod}).
+ * {@link TranslateMethod}) + {@code sysconfig} (AD_SysConfig values, {@link SysConfigMethod}).
  * <p>
  * Document language: the print format's language when the request carries one (core sets the business
  * partner's language there for multi-lingual documents), else the language of the request's context.
@@ -126,6 +126,9 @@ public class FreemarkerReportRenderer implements IReportRenderer<FreemarkerRepor
 			}
 			dataModel.put("ctx", contextMap(ctx, language));
 			dataModel.put("msg", new TranslateMethod(language.getAD_Language(), isSOTrx(config)));
+			// sysconfig("Key"[, "default"]): AD_SysConfig in the printing context's client/org, the
+			// equivalent of a classic @$sysconfig.Name@ — IDEMPIERE-7070 issue #1 (dpansheriya), problem 4
+			dataModel.put("sysconfig", new SysConfigMethod(Env.getAD_Client_ID(ctx), Env.getAD_Org_ID(ctx)));
 			dataModel.put("assets", AssetResolver.asBase64(ctx, printTemplate));
 
 			if (isPdfOutput(config, printTemplate)) {
