@@ -38,6 +38,7 @@ import org.compiere.model.MLookupFactory;
 import org.compiere.model.MLookupInfo;
 import org.compiere.model.MRefList;
 import org.compiere.model.MRole;
+import org.compiere.model.MSysConfig;
 import org.compiere.model.MTable;
 import org.compiere.model.PO;
 import org.compiere.model.POInfo;
@@ -74,6 +75,13 @@ public final class PO2MapBuilder {
 	 * ({@code DocStatus_display = "Completed"}).
 	 */
 	public static final String LIST_NAME_SUFFIX = "_display";
+
+	/**
+	 * SysConfig (per client, default N): when Y, a physical dictionary column the view does not return, or
+	 * a value that does not read as the column's type, is skipped instead of reported — the pre-issue-#1
+	 * behavior. IDEMPIERE-7070 issue #1 (dpansheriya), problem 3.
+	 */
+	public static final String SYSCONFIG_LENIENT_COLUMNS = "PRT_FREEMARKER_LENIENT_COLUMNS";
 
 	private static final CLogger log = CLogger.getCLogger(PO2MapBuilder.class);
 
@@ -149,29 +157,82 @@ public final class PO2MapBuilder {
 	 * lookup do POInfo (sem instância de PO).
 	 */
 	public static Map<String, Object> buildFlatFromRS(POInfo info, ResultSet rs) throws SQLException {
-		return buildFlatFromRS(null, info, rs, null);
+		return buildFlatFromRS(null, info, rs, null, true);
 	}
 
 	/**
 	 * Same as {@link #buildFlatFromRS(POInfo, ResultSet)} with the {@code display} of foreign keys in a
-	 * document language.
+	 * document language; lenient (a missing or mistyped column is skipped).
 	 *
 	 * @param ctx context of the request (client, role); needed with {@code display}
 	 * @param display document language of lookup values; null = the language of the POInfo's context
 	 */
 	public static Map<String, Object> buildFlatFromRS(Properties ctx, POInfo info, ResultSet rs,
 			DisplayLanguage display) throws SQLException {
+		return buildFlatFromRS(ctx, info, rs, display, true);
+	}
+
+	/**
+	 * The SELECT-list fragment for the dictionary's virtual (ColumnSQL) columns, each as
+	 * {@code , <expression> AS <ColumnName>} so a {@code SELECT *} before it also returns them; empty when
+	 * the table has none. {@code SELECT *} followed by this fragment is the column set the dictionary
+	 * defines. IDEMPIERE-7070 issue #1 (dpansheriya), problem 3.
+	 */
+	public static String virtualColumns(POInfo info) {
+		StringBuilder sb = new StringBuilder();
+		for (int i = 0; i < info.getColumnCount(); i++) {
+			if (info.isEncrypted(i) || !info.isVirtualColumn(i))
+				continue;
+			sb.append(", ").append(info.getColumnSQL(i));
+		}
+		return sb.toString();
+	}
+
+	/**
+	 * @return true when a dictionary/view column mismatch is skipped instead of reported (SysConfig
+	 *         {@link #SYSCONFIG_LENIENT_COLUMNS}, per client; default false)
+	 */
+	public static boolean isLenientColumns(Properties ctx) {
+		return MSysConfig.getBooleanValue(SYSCONFIG_LENIENT_COLUMNS, false, Env.getAD_Client_ID(ctx));
+	}
+
+	/**
+	 * Same as {@link #buildFlatFromRS(Properties, POInfo, ResultSet, DisplayLanguage)} but, when
+	 * {@code lenient} is false, a physical dictionary column the result set does not return, or a value
+	 * that does not read as the column's type, raises an {@link AdempiereException} naming the table and
+	 * column instead of being skipped. A virtual (ColumnSQL) column absent from the result set is always
+	 * skipped: whether it is selected is the caller's choice ({@link #virtualColumns(POInfo)}), not a view
+	 * mismatch.
+	 *
+	 * @param lenient true skips a missing or mistyped column (pre-issue-#1 behavior); false reports it
+	 */
+	public static Map<String, Object> buildFlatFromRS(Properties ctx, POInfo info, ResultSet rs,
+			DisplayLanguage display, boolean lenient) throws SQLException {
 		Map<String, Object> map = new LinkedHashMap<>();
 		Set<String> returned = columnLabels(rs);
 		for (int i = 0; i < info.getColumnCount(); i++) {
 			if (info.isEncrypted(i))
 				continue;
 			String columnName = info.getColumnName(i);
-			// SELECT * returns no virtual (ColumnSQL) column: only what the query returns is read
-			if (!returned.contains(columnName.toLowerCase()))
-				continue;
+			if (!returned.contains(columnName.toLowerCase())) {
+				// a virtual column is present only when the caller selected it: its absence is not a mismatch
+				if (lenient || info.isVirtualColumn(i))
+					continue;
+				throw new AdempiereException("Print Template: column " + info.getTableName() + "." + columnName
+						+ " is in the dictionary but the view does not return it (set "
+						+ SYSCONFIG_LENIENT_COLUMNS + "=Y to skip it)");
+			}
 			int displayType = info.getColumnDisplayType(i);
-			Object value = readValue(rs, columnName, info.getColumnClass(i));
+			Object value;
+			try {
+				value = readValue(rs, columnName, info.getColumnClass(i));
+			} catch (SQLException e) {
+				if (lenient)
+					continue;
+				throw new AdempiereException("Print Template: column " + info.getTableName() + "." + columnName
+						+ " (" + info.getColumnClass(i).getSimpleName()
+						+ ") does not match the value the view returns: " + e.getMessage(), e);
+			}
 			if (value instanceof Integer && DisplayType.isLookup(displayType) && !info.isKey(i)) {
 				Map<String, Object> fk = new LinkedHashMap<>();
 				fk.put("id", value);
