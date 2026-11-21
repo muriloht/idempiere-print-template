@@ -82,6 +82,18 @@ Working examples live in [`examples/`](examples/):
 A fuller authoring guide (data model, available built-ins, and gotchas) is
 kept in `spec/` (not versioned).
 
+### Fonts (PDF)
+
+Without an embedded font, PDF output falls back to the 14 standard PDF fonts (WinAnsi), so letters outside
+Western Europe (`Č ľ ť ň ő ű ł …`) print as `#`. The plugin bundles the **DejaVu Sans / Serif / Mono**
+faces and registers them (embedded as a subset), so `font-family: sans-serif` (and `serif` / `monospace`)
+cover those letters out of the box — the same faces the Jasper engine bundles, so a document renders the
+same across engines.
+
+To add your own fonts, drop the `.ttf` / `.otf` files in the directory named by the core SysConfig
+`PDF_FONT_DIR` (the same key the classic print path reads). A face there wins over a bundled one of the same
+family, weight and style; name the font in CSS by its family (`font-family: "Your Font";`).
+
 ## Build & install
 
 Requires iDempiere 14 / Java 17. Import `org.idempiere.print.freemarker`
