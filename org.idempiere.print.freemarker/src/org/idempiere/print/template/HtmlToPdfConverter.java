@@ -35,12 +35,24 @@ public final class HtmlToPdfConverter {
 
 	private HtmlToPdfConverter() {}
 
+	/** Converts with the standard PDF fonts only (no font registered). */
 	public static void convert(String html, OutputStream output) throws IOException {
+		convert(html, output, PdfFontCatalog.EMPTY);
+	}
+
+	/**
+	 * Converts with the fonts of the catalog registered, embedded as subsets.
+	 *
+	 * @param fonts the fonts; {@link PdfFontCatalog#EMPTY} keeps the standard PDF fonts
+	 */
+	public static void convert(String html, OutputStream output, PdfFontCatalog fonts) throws IOException {
 		org.jsoup.nodes.Document jsoupDocument = Jsoup.parse(html);
 		org.w3c.dom.Document w3cDocument = new W3CDom().fromJsoup(jsoupDocument);
 
 		PdfRendererBuilder builder = new PdfRendererBuilder();
 		builder.useFastMode();
+		if (fonts != null)
+			fonts.registerOn(builder);
 		builder.withW3cDocument(w3cDocument, null);
 		builder.toStream(output);
 		builder.run();

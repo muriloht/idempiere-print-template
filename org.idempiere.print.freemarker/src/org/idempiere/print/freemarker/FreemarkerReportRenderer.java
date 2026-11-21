@@ -35,6 +35,7 @@ import org.compiere.util.Language;
 import org.idempiere.print.renderer.IReportRenderer;
 import org.idempiere.print.template.HtmlToPdfConverter;
 import org.idempiere.print.template.PO2MapBuilder;
+import org.idempiere.print.template.PdfFontCatalog;
 import org.idempiere.print.template.model.MPrintTemplate;
 import org.idempiere.print.template.model.X_AD_PrintTemplate;
 
@@ -136,13 +137,16 @@ public class FreemarkerReportRenderer implements IReportRenderer<FreemarkerRepor
 				// controla tamanho/margens; jsoup tolera HTML não-XHTML)
 				StringWriter html = new StringWriter();
 				GuardedRender.process(template, dataModel, html, adClientId, ctx, language);
+				// fonts of the printing client (PDF_FONT_DIR over the bundled DejaVu), embedded as subsets so
+				// letters outside Western Europe do not print as '#'
+				PdfFontCatalog fonts = PdfFonts.get(adClientId);
 				if (config.getOutputStream() != null) {
 					// the caller's stream is flushed, not closed
-					HtmlToPdfConverter.convert(html.toString(), config.getOutputStream());
+					HtmlToPdfConverter.convert(html.toString(), config.getOutputStream(), fonts);
 					config.getOutputStream().flush();
 				} else {
 					try (OutputStream output = resolveOutputStream(config)) {
-						HtmlToPdfConverter.convert(html.toString(), output);
+						HtmlToPdfConverter.convert(html.toString(), output, fonts);
 					}
 				}
 			} else {
